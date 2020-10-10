@@ -4,6 +4,8 @@ from bs4 import BeautifulSoup
 import time
 import re
 from bs4.element import Comment
+import urllib
+import argparse
 
 class crawler:
     def __init__(self):
@@ -33,7 +35,7 @@ class crawler:
         self.all_articles = []
         self.all_popular = []
         self.tic = time.time()
-
+        self.annotation = []
     def find_first_page(self):
         """
         target of the function is to find out the starting page when the date is 2018/12/31
@@ -117,6 +119,7 @@ class crawler:
                 popular = sec.find("div", class_="nrec")
                 if popular.find("span"):
                     popular = popular.find("span").text
+                    print(self.cur_url)
                     print(popular)
                 else:
                     popular = "0"
@@ -125,9 +128,14 @@ class crawler:
                 if title_string.find("[公告]") != -1:
                     print(title_string)
                 else:
-                    self.all_articles.append(date + "," + title_string + "," + href)
                     if popular == "爆":
+                        annotation = 1
                         self.all_popular.append(date + "," + title_string + "," + href)
+                    elif popular.isdigit() and int(popular) >= 35:
+                        annotation = 1
+                    else:
+                        annotation = 0
+                    self.all_articles.append(date + "," + title_string + "," + str(annotation) +"," + href)
         self.next_page()
 
     def get_list(self, list_file, start_date, end_date):
@@ -185,16 +193,19 @@ class crawler:
                 return True
         return False
 
-
-    def crawl_for_popular(self, list):
+    def crawl_for_popular(self,arg, list):
         all_popular = len(list)
         file_types = ("jpg", "jpeg", "png", "gif")
         img_urls = []
+        p_count = 0
+        n_count = 0
         for page in list:
             time.sleep(0.05)
             rs = requests.session()
             req = rs.post("https://www.ptt.cc/ask/over18", data=self.payload)
             req = rs.get(page[-1])  # page[2] = url
+            print(page[-1])
+            annotation = page[-2]
             req = req.text
             page_soup = BeautifulSoup(req, 'html.parser')
             if self.check_validate(page_soup):
@@ -204,6 +215,15 @@ class crawler:
                     # 這裡的url要換成get text
                     if img_url.endswith(file_types):
                         img_urls.append(img_url)
+                        type = img_url.split(".")[-1]
+                        if annotation == "1":
+                            path = "./pic{}/p{}.{}".format(arg.month,p_count,type)
+                            p_count = p_count+1
+                            urllib.request.urlretrieve(img_url, path)
+                        else:
+                            path = "./pic{}/n{}.{}".format(arg.month,n_count,type)
+                            n_count = n_count+1
+                            urllib.request.urlretrieve(img_url, path)
             else:
                 print(page[-1])
         return all_popular, img_urls
@@ -216,14 +236,12 @@ class crawler:
         return True
 
     def text_from_html(self,page_soup):
-        page_soup.find("div",id="topbar-container").decompose()
-        page_soup.find("div",id = "navigation-container").decompose()
         texts = page_soup.findAll(text=True)
         visible_texts = filter(self.tag_visible, texts)
         return " ".join(t.strip() for t in visible_texts)
 
 
-    def find_keyword(self,keyword,list):
+    def find_keyword(self,list):
         modified_list = []
         for page in list:
             time.sleep(0.1)
@@ -233,21 +251,7 @@ class crawler:
             req = req.text
             page_soup = BeautifulSoup(req, 'html.parser')
             if self.check_validate(page_soup):
-                page_text = self.text_from_html(page_soup)
-                page_soup = page_text.split(" ※ 發信站: ")
-                if "\n--\n" in page_soup[0]:
-                    page_soup = page_soup[0].split("\n--")
-                    page_soup.pop(-1)
-                    clear_text = ""
-                    for item in page_soup:
-                        clear_text = clear_text + item
-                else:
-                    clear_text = page_soup[0]
-                if keyword in clear_text:
-                    print(clear_text)
-                    modified_list.append(page)
-        return modified_list
-
+                print(self.text_from_html(page_soup))
 
 
 
@@ -266,12 +270,11 @@ class crawler:
             outputfile.write("boo #{}: {} {}".format(idx + 1, id[0], id[1]) + "\n")
         outputfile.close()
 
-    def popular(self, start_date, end_date):
-        list_file = "all_popular.txt"
+    def popular(self, arg,start_date, end_date):
+        list_file = "page_annotation.txt"
         list = self.get_list(list_file, start_date, end_date)
-        all_popular, popular_url = self.crawl_for_popular(list)
+        all_popular, popular_url = self.crawl_for_popular(arg,list)
         outputfile = open("popular[{}-{}].txt".format(start_date,end_date),"w")
-        outputfile.write("number of popular articles: {}".format(all_popular))
         for url in popular_url:
             outputfile.write(url+"\n")
         outputfile.close()
@@ -279,8 +282,7 @@ class crawler:
     def keyword(self,keyword,start_date,end_date):
         list_file = "all_articles.txt"
         list = self.get_list(list_file,start_date,end_date)
-        list = self.find_keyword(keyword,list)
-        ipdb.set_trace()
+        list = self.find_keyword(list)
         url = self.crawl_for_popular(list)
 
 
@@ -290,9 +292,14 @@ if __name__ == '__main__':
     toc_1 = time.time()
     crawl = False
     push = False
-    popular = False
-    keyword = True
+    popular = True
+    keyword = False
 
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--start_date",type=int)
+    parser.add_argument("--end_date", type=int)
+    parser.add_argument("--month", type=int)
+    arg = parser.parse_args()
 
     if crawl == True:
         c.find_first_page()
@@ -302,6 +309,7 @@ if __name__ == '__main__':
         c.crawl(phase="end")
         toc_2 = time.time()
         ipdb.set_trace()
+        '''
         outputfile = open("all_articles.txt", "w")
         for item in c.all_articles:
             outputfile.write(item + "\n")
@@ -310,6 +318,11 @@ if __name__ == '__main__':
         for item in c.all_popular:
             outputfile.write(item + "\n")
         outputfile.close()
+        '''
+        outputfile = open("page_annotation.txt", "w")
+        for item in c.all_articles:
+            outputfile.write(str(item) + "\n")
+        outputfile.close()
 
     if push == True:
         start_date = '101'
@@ -317,12 +330,12 @@ if __name__ == '__main__':
         c.push(start_date, end_date)
 
     if popular == True:
-        start_date = '301'
-        end_date = '310'
-        c.popular(start_date, end_date)
+        start_date = arg.start_date
+        end_date = arg.end_date
+        c.popular(arg,start_date, end_date)
 
     if keyword == True:
         start_date = '301'
         end_date = '310'
-        keyword = '美女'
+        keyword = 'keyword'
         c.keyword(keyword,start_date,end_date)
